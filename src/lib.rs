@@ -24,7 +24,6 @@ pub fn create_project(project_meta_data: ProjectMetaData) -> Result<(), Error> {
     let project_path =
         Path::new(&project_meta_data.workspace_dir).join(&project_meta_data.project_name);
 
-    println!("Will Create {:?}", project_path);
     fs::create_dir(&project_path)?;
 
     env::set_current_dir(&project_path)?;
