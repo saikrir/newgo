@@ -79,7 +79,19 @@ pub fn get_project_meta_data() -> ProjectMetaData {
     };
 
     let workspace_dir = get_input("Workspace Directory", ws_validator);
-    let project_name = get_input("Project Name", &no_space_validator);
+    let project_name = get_input("Project Name", |prj_name| {
+        let comps = prj_name.split_whitespace().collect::<Vec<&str>>();
+        if comps.len() > 1 {
+            return false;
+        }
+
+        if Path::new(&workspace_dir).join(prj_name).exists() {
+            println!("{prj_name} exists in {workspace_dir}");
+            return false;
+        }
+
+        return true;
+    });
     let module_prefix = get_input("Module Prefix", &no_space_validator);
 
     ProjectMetaData {
