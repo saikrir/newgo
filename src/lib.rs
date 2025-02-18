@@ -1,10 +1,9 @@
 use std::{
-    env,
-    ffi::OsStr,
-    fs,
+    env, fs,
     io::{self, Error, ErrorKind, Write},
-    path::Path,
-    process::{Child, Command},
+    path::{Path, PathBuf},
+    process::Command,
+    str::FromStr,
 };
 
 #[derive(Debug)]
@@ -47,7 +46,7 @@ where
     let mut user_input: String = String::new();
 
     loop {
-        print!("Please enter {field_name} :");
+        print!("Please enter {field_name}: ");
         io::stdout().flush().unwrap();
         match io::stdin().read_line(&mut user_input) {
             Ok(_) => {
@@ -84,7 +83,6 @@ pub fn get_project_meta_data() -> ProjectMetaData {
         if comps.len() > 1 {
             return false;
         }
-
         if Path::new(&workspace_dir).join(prj_name).exists() {
             println!("{prj_name} exists in {workspace_dir}");
             return false;
@@ -116,6 +114,14 @@ pub fn exec_cmd(program: &str, args: &[&str]) -> Result<(), Error> {
             Err(err)
         }
     }
+}
+
+pub fn check_defaults() {
+    let home_dir = match env::home_dir() {
+        Some(home_dir) => home_dir,
+        None => PathBuf::from_str(".").unwrap(),
+    };
+    let info_file = home_dir.join("newgo.json");
 }
 
 // Print Greeting Message
