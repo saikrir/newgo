@@ -6,10 +6,30 @@ use std::{
     str::FromStr,
 };
 
+use serde::{Deserialize, Serialize};
+
+const GO_CMD: &'static str = "go";
+const META_FILE: &'static str = "newgo.json";
+const MAIN_GO_CONTENT: &'static str = r#"
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello World")
+}
+"#;
+
 #[derive(Debug)]
 pub struct ProjectMetaData {
     workspace_dir: String,
     project_name: String,
+    module_prefix: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct MetaInfo {
+    workspace_dir: String,
     module_prefix: String,
 }
 
@@ -18,8 +38,6 @@ pub fn print_banner() {
 }
 
 pub fn create_project(project_meta_data: ProjectMetaData) -> Result<(), Error> {
-    let go_cmd = "go";
-
     let project_path =
         Path::new(&project_meta_data.workspace_dir).join(&project_meta_data.project_name);
 
@@ -32,27 +50,31 @@ pub fn create_project(project_meta_data: ProjectMetaData) -> Result<(), Error> {
         &project_meta_data.module_prefix, &project_meta_data.project_name
     );
 
-    exec_cmd(&go_cmd, &["mod", "init", &module_name])?;
+    exec_cmd(&GO_CMD, &["mod", "init", &module_name])?;
+
+    let main_go_path = PathBuf::from(&project_path).join("main.go");
+
+    copy_file_to_path(&main_go_path)?;
 
     exec_cmd("code", &[&project_path.as_os_str().to_str().unwrap()])?;
-
     Ok(())
 }
 
-fn get_input<T>(field_name: &str, field_validator: T) -> String
+fn get_input<T, U>(field_name: U, field_validator: T) -> String
 where
     T: Fn(&str) -> bool,
+    U: AsRef<str> + std::fmt::Debug,
 {
     let mut user_input: String = String::new();
 
     loop {
-        print!("Please enter {field_name}: ");
+        print!("Please enter {field_name:?}: ");
         io::stdout().flush().unwrap();
         match io::stdin().read_line(&mut user_input) {
             Ok(_) => {
                 let user_input_trimmed = user_input.trim();
                 if !field_validator(user_input_trimmed) {
-                    println!("{field_name} is not valid, try again!");
+                    println!("{field_name:?} is not valid, try again!");
                     user_input.clear();
                     continue;
                 }
@@ -77,7 +99,33 @@ pub fn get_project_meta_data() -> ProjectMetaData {
         comps.len() == 1
     };
 
-    let workspace_dir = get_input("Workspace Directory", ws_validator);
+    let prj_meta_data = get_project_metadata_from_file();
+
+    let yes_no_validator =
+        |f: &str| f.len() == 1 && f.to_uppercase() == "Y" || f.to_uppercase() == "N";
+
+    let use_default_ws_dir = get_input(
+        format!("use {} for project directory", &prj_meta_data.workspace_dir),
+        yes_no_validator,
+    );
+
+    let workspace_dir = if use_default_ws_dir.to_uppercase() == "Y" {
+        prj_meta_data.workspace_dir.clone()
+    } else {
+        get_input("Workspace Directory", ws_validator)
+    };
+
+    let use_default_module_prefix = get_input(
+        format!("use {} for module prefix", &prj_meta_data.module_prefix),
+        yes_no_validator,
+    );
+
+    let module_prefix = if use_default_module_prefix.to_uppercase() == "Y" {
+        prj_meta_data.module_prefix.clone()
+    } else {
+        get_input("Module Prefix", &no_space_validator)
+    };
+
     let project_name = get_input("Project Name", |prj_name| {
         let comps = prj_name.split_whitespace().collect::<Vec<&str>>();
         if comps.len() > 1 {
@@ -90,7 +138,6 @@ pub fn get_project_meta_data() -> ProjectMetaData {
 
         return true;
     });
-    let module_prefix = get_input("Module Prefix", &no_space_validator);
 
     ProjectMetaData {
         module_prefix,
@@ -100,11 +147,11 @@ pub fn get_project_meta_data() -> ProjectMetaData {
 }
 
 pub fn exec_cmd(program: &str, args: &[&str]) -> Result<(), Error> {
-    let result = Command::new(program).args(args).spawn();
+    let result = Command::new(program).args(args).output();
 
     match result {
-        Ok(ch) => {
-            println!("Process exited {:?} ", ch.id());
+        Ok(_ch) => {
+            //println!("Process exited {:?} ", ch.wait_with_output()?.stdout);
             Ok(())
         }
         Err(err) => {
@@ -117,11 +164,56 @@ pub fn exec_cmd(program: &str, args: &[&str]) -> Result<(), Error> {
 }
 
 pub fn check_defaults() {
+    let meta_file = get_home_dir().join(META_FILE);
+    if !meta_file.exists() {
+        println!("lets setup some defaults!");
+        io::stdout().flush().unwrap();
+        create_project_metadata();
+    }
+}
+
+fn get_project_metadata_from_file() -> MetaInfo {
+    let meta_file = get_home_dir().join(META_FILE);
+    if !meta_file.exists() {
+        panic!("meta file does not exist");
+    }
+
+    let json_content = fs::read_to_string(meta_file).expect("error reading metafile");
+    let meta_info = serde_json::from_str(&json_content).expect("failed to deserialize json");
+    return meta_info;
+}
+
+fn create_project_metadata() -> MetaInfo {
+    let meta_file = get_home_dir().join(META_FILE);
+    let workspace_dir = get_input("Workspace Directory", |path| Path::new(path).exists());
+    let module_prefix = get_input("Module Prefix", |pref| pref.starts_with("github.com/"));
+
+    let meta_info = MetaInfo {
+        workspace_dir,
+        module_prefix,
+    };
+
+    let json_data = serde_json::to_string_pretty(&meta_info).expect("error converting to json");
+    fs::write(meta_file, json_data).expect("error writing to json");
+    meta_info
+}
+
+fn get_home_dir() -> PathBuf {
     let home_dir = match env::home_dir() {
         Some(home_dir) => home_dir,
         None => PathBuf::from_str(".").unwrap(),
     };
-    let info_file = home_dir.join("newgo.json");
+    return home_dir;
+}
+
+pub fn detect_go_version() -> Result<(), Error> {
+    exec_cmd("go", &vec!["version"])?;
+    Ok(())
+}
+
+fn copy_file_to_path(target_path: &Path) -> Result<(), Error> {
+    fs::write(target_path, MAIN_GO_CONTENT)?;
+    Ok(())
 }
 
 // Print Greeting Message
