@@ -8,9 +8,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-const GO_CMD: &'static str = "go";
-const META_FILE: &'static str = "newgo.json";
-const MAIN_GO_CONTENT: &'static str = r#"
+const GO_CMD: &str = "go";
+const META_FILE: &str = "newgo.json";
+const MAIN_GO_CONTENT: &str = r#"
 package main
 
 import "fmt"
@@ -60,7 +60,7 @@ pub fn create_project(project_meta_data: ProjectMetaData) -> Result<(), Error> {
     Ok(())
 }
 
-fn get_input<T, U>(field_name: U, field_validator: T) -> String
+fn get_input<T, U>(field_name: U, message: U, field_validator: T) -> String
 where
     T: Fn(&str) -> bool,
     U: AsRef<str> + std::fmt::Debug,
@@ -68,7 +68,7 @@ where
     let mut user_input: String = String::new();
 
     loop {
-        print!("Please enter {field_name:?}: ");
+        print!("{message:?}: ");
         io::stdout().flush().unwrap();
         match io::stdin().read_line(&mut user_input) {
             Ok(_) => {
@@ -81,7 +81,7 @@ where
                 return user_input_trimmed.to_string();
             }
             Err(_) => {
-                println!("Error reading input, please try again!");
+                println!("Error reading input for field {field_name:?}, please try again!");
                 continue;
             }
         };
@@ -104,40 +104,63 @@ pub fn get_project_meta_data() -> ProjectMetaData {
     let yes_no_validator =
         |f: &str| f.len() == 1 && f.to_uppercase() == "Y" || f.to_uppercase() == "N";
 
+    let ws_field_name = "Workspace Directory";
     let use_default_ws_dir = get_input(
-        format!("use {} for project directory", &prj_meta_data.workspace_dir),
+        ws_field_name,
+        &format!(
+            "use {} for workspace directory (Y/N): ",
+            &prj_meta_data.workspace_dir
+        ),
         yes_no_validator,
     );
 
     let workspace_dir = if use_default_ws_dir.to_uppercase() == "Y" {
         prj_meta_data.workspace_dir.clone()
     } else {
-        get_input("Workspace Directory", ws_validator)
+        get_input(
+            ws_field_name,
+            &format!("Please enter: {}", ws_field_name),
+            ws_validator,
+        )
     };
 
+    let module_prefix_field = "Module Prefix";
     let use_default_module_prefix = get_input(
-        format!("use {} for module prefix", &prj_meta_data.module_prefix),
+        module_prefix_field,
+        &format!(
+            "use {} for module prefix (Y/N): ",
+            &prj_meta_data.module_prefix
+        ),
         yes_no_validator,
     );
 
     let module_prefix = if use_default_module_prefix.to_uppercase() == "Y" {
         prj_meta_data.module_prefix.clone()
     } else {
-        get_input("Module Prefix", &no_space_validator)
+        get_input(
+            module_prefix_field,
+            &format!("Please enter {}", module_prefix_field),
+            &no_space_validator,
+        )
     };
 
-    let project_name = get_input("Project Name", |prj_name| {
-        let comps = prj_name.split_whitespace().collect::<Vec<&str>>();
-        if comps.len() > 1 {
-            return false;
-        }
-        if Path::new(&workspace_dir).join(prj_name).exists() {
-            println!("{prj_name} exists in {workspace_dir}");
-            return false;
-        }
+    let project_name_field = "Project Name";
+    let project_name = get_input(
+        project_name_field,
+        &format!("Please enter {}", project_name_field),
+        |prj_name| {
+            let comps = prj_name.split_whitespace().collect::<Vec<&str>>();
+            if comps.len() > 1 {
+                return false;
+            }
+            if Path::new(&workspace_dir).join(prj_name).exists() {
+                println!("{prj_name} exists in {workspace_dir}");
+                return false;
+            }
 
-        return true;
-    });
+            return true;
+        },
+    );
 
     ProjectMetaData {
         module_prefix,
@@ -185,8 +208,14 @@ fn get_project_metadata_from_file() -> MetaInfo {
 
 fn create_project_metadata() -> MetaInfo {
     let meta_file = get_home_dir().join(META_FILE);
-    let workspace_dir = get_input("Workspace Directory", |path| Path::new(path).exists());
-    let module_prefix = get_input("Module Prefix", |pref| pref.starts_with("github.com/"));
+    let workspace_dir = get_input(
+        "Workspace Directory",
+        "Please enter Workspace Directory",
+        |path| Path::new(path).exists(),
+    );
+    let module_prefix = get_input("Module Prefix", "Please enter module prefix", |pref| {
+        pref.starts_with("github.com/")
+    });
 
     let meta_info = MetaInfo {
         workspace_dir,
